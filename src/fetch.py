@@ -1,34 +1,16 @@
 """Fetch Polymarket data from the Data API and Dome API."""
 
 import logging
-import os
 from datetime import datetime, timezone
 
 from dome_api_sdk.types import OrderbookSnapshot
 import pandas as pd
 import requests
 
-from dome_api_sdk import DomeClient
+from src.settings import settings
 
 
 logger = logging.getLogger(__name__)
-BASE_URL = "https://data-api.polymarket.com"
-GAMMA_URL = "https://gamma-api.polymarket.com"
-CLOB_URL = "https://clob.polymarket.com"
-
-# Dome API client (requires DOME_API_KEY env var for Dome calls)
-_dome_client: DomeClient | None = None
-
-
-def _get_dome_client() -> DomeClient:
-    """Return Dome client; requires DOME_API_KEY to be set."""
-    global _dome_client
-    if _dome_client is None:
-        api_key = os.environ.get("DOME_API_KEY")
-        if not api_key:
-            raise ValueError("DOME_API_KEY environment variable is required for Dome API calls")
-        _dome_client = DomeClient({"api_key": api_key, "timeout": 30})
-    return _dome_client
 
 
 def get_closed_positions(
@@ -57,7 +39,7 @@ def get_closed_positions(
     rows: list[dict] = []
     while True:
         resp = requests.get(
-            f"{BASE_URL}/closed-positions",
+            f"{settings.DATA_API_URL}/closed-positions",
             params=params,
             timeout=30,
         )
@@ -110,7 +92,7 @@ def get_trades(
     rows: list[dict] = []
     while True:
         resp = requests.get(
-            f"{BASE_URL}/trades",
+            f"{settings.DATA_API_URL}/trades",
             params=params,
             timeout=30,
         )
@@ -150,7 +132,7 @@ def get_markets(condition_ids: list[str]) -> pd.DataFrame:
     if not condition_ids:
         return []
     resp = requests.get(
-        f"{GAMMA_URL}/markets",
+        f"{settings.GAMMA_API_URL}/markets",
         params={"condition_ids": condition_ids},
         timeout=30,
     )
@@ -171,7 +153,7 @@ def get_markets_by_slug(slugs: list[str]) -> list[dict]:
     if not slugs:
         return []
     resp = requests.get(
-        f"{GAMMA_URL}/markets",
+        f"{settings.GAMMA_API_URL}/markets",
         params=[("slug", s) for s in slugs],
         timeout=30,
     )
@@ -197,7 +179,7 @@ def get_orderbook_history(
     limit: int = 200,
 ):
     """Fetch full orderbook history, paginating until no more snapshots."""
-    client = _get_dome_client()
+    client = settings.dome_client()
     params: dict = {
         "token_id": token_id,
         "start_time": _to_utc_ts(start_time) * 1000,

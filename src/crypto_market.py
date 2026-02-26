@@ -8,6 +8,7 @@ import math
 import requests
 
 from src.fetch import get_markets_by_slug, _to_utc_ts
+from src.settings import settings
 
 
 SLUG_BATCH_SIZE = 50
@@ -73,7 +74,6 @@ class CryptoMarkets15m:
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
 
-        url = "https://api.binance.com/api/v3/klines"
         symbol = f"{self.asset.upper()}USDT"
         params = {
             "symbol": symbol,
@@ -82,7 +82,7 @@ class CryptoMarkets15m:
             "endTime": int(end.timestamp() * 1000),
             "limit": 900,
         }
-        response = requests.get(url, params=params)
+        response = requests.get(settings.BINANCE_URL, params=params)
         data = response.json()
 
         # kline: [open_time, open, high, low, close, volume, ...]
