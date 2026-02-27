@@ -9,6 +9,8 @@ import requests
 
 from src.fetch import get_markets_by_slug, _to_utc_ts
 from src.settings import settings
+from src.strategy import MarketState, StrategyBase
+from src.transaction import OrderType, Transaction
 
 
 SLUG_BATCH_SIZE = 50
@@ -109,3 +111,35 @@ class CryptoMarkets15m:
         except Exception:
             return None
 
+
+class PriceDirectionStrategy(StrategyBase):
+    """
+    At a given time t: buy Up if price(t) > price(0), else buy Down, only if the
+    chosen outcome's ask is less then the predicted probability.
+    """
+
+    def __init__(self):
+        self.initial_price = None
+        self.initial_market = None
+
+    def __call__(
+        self, market_state: MarketState, t: int, price: float,
+    ) -> Transaction | None:
+        if self.initial_market != market_state.slug:
+            self.initial_price = price
+            self.initial_market = market_state.slug
+
+        if t != 800:
+            return None
+
+        outcome_to_buy = "Up" if self.initial_price < price else "Down"
+        best_ask = market_state.orderbooks[outcome_to_buy].get_ask(0)
+        if best_ask.price < 0.92:
+            return Transaction(
+                outcome=outcome_to_buy,
+                order_type=OrderType.BUY,
+                shares=1,
+                price=best_ask.price,
+            )
+
+        return None
