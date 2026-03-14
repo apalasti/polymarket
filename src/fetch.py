@@ -177,8 +177,14 @@ def get_orderbook_history(
     start_time: datetime | int | float,
     end_time: datetime | int | float,
     limit: int = 200,
+    max_pages: int | None = None,
+    downsample_seconds: int | None = None,
 ):
-    """Fetch full orderbook history, paginating until no more snapshots."""
+    """Fetch orderbook history, paginating until no more snapshots or max_pages is reached.
+
+    If downsample_seconds is set (e.g. 1), keeps at most one snapshot per interval;
+    the first snapshot in each second (or interval) is kept. Snapshot timestamps are in ms.
+    """
     client = settings.dome_client()
     params: dict = {
         "token_id": token_id,
@@ -188,16 +194,33 @@ def get_orderbook_history(
     }
 
     all_snapshots: list[OrderbookSnapshot] = []
+
+    # For downsampling
+    interval_ms = (downsample_seconds * 1000) if (downsample_seconds is not None and downsample_seconds >= 1) else None
+    seen_buckets: set[int] = set()
+
     httpx_logger = logging.getLogger("httpx")
     saved_level = httpx_logger.level
     try:
         httpx_logger.setLevel(logging.WARNING)
+        page_count = 0
         while True:
             result = client.polymarket.markets.get_orderbooks(params)
-            all_snapshots.extend(result.snapshots)
+            if interval_ms is None:
+                all_snapshots.extend(result.snapshots)
+            else:
+                for s in result.snapshots:
+                    bucket = int(s.timestamp // interval_ms) * interval_ms
+                    if bucket not in seen_buckets:
+                        seen_buckets.add(bucket)
+                        all_snapshots.append(s)
+            page_count += 1
+            if max_pages is not None and page_count >= max_pages:
+                break
             if not result.pagination.has_more or result.pagination.pagination_key is None:
                 break
             params["pagination_key"] = result.pagination.pagination_key
     finally:
         httpx_logger.setLevel(saved_level)
+
     return all_snapshots
