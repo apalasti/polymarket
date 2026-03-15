@@ -19,7 +19,6 @@ def main():
     returns = []
     with duckdb.connect(CRYPTO_DATA_DIR / "test.duckdb") as conn:
         slugs: pd.Series = conn.query("SELECT DISTINCT slug FROM resolved ORDER BY slug;").fetchdf()["slug"]
-        slugs = slugs.iloc[:100]
         for _, slug in (
             pbar := tqdm(slugs.items(), total=len(slugs), desc="Processing slugs")
         ):
