@@ -3,7 +3,7 @@ import json
 import pandas as pd
 
 from .settings import settings
-from .strategy import MarketState, StrategyBase
+from .strategy import ExecutorProtocol, MarketState, StrategyBase
 from .transaction import OrderType, Transaction
 
 
@@ -16,7 +16,8 @@ MIN_CONFIDENCE_THRESHOLD = 0.05
 
 
 class AIStrategy(StrategyBase):
-    def __init__(self):
+    def __init__(self, executor: ExecutorProtocol):
+        super().__init__(executor=executor)
         self.start_prices: dict[str, float] = {}
 
     def __call__(
@@ -46,13 +47,14 @@ class AIStrategy(StrategyBase):
         else:
             bet_outcome = "Down" if current_direction == "Up" else "Up"
 
-        desired_shares = int(confidence * BASE_SHARE_COUNT * 2)
+        desired_price = prob - 0.05
+        desired_shares = min(int(confidence * BASE_SHARE_COUNT * 2), self.executor.capital // desired_price)
 
         orderbook = market_state.orderbooks.get(bet_outcome)
         if not orderbook:
             return []
 
-        available, execute_price = orderbook.get_liquidity(desired_shares, prob - 0.05)
+        available, execute_price = orderbook.get_liquidity(desired_shares, desired_price)
         if available == 0:
             return []
 

@@ -88,10 +88,7 @@ class CryptoMarkets15m:
         data = response.json()
 
         # kline: [open_time, open, high, low, close, volume, ...]
-        return [
-            float(candle[4])
-            for candle in data
-        ]
+        return [float(candle[4]) for candle in data]
 
     @staticmethod
     def slug_to_time_range(slug: str) -> tuple[datetime, datetime] | None:
@@ -110,36 +107,3 @@ class CryptoMarkets15m:
             return start, end
         except Exception:
             return None
-
-
-class PriceDirectionStrategy(StrategyBase):
-    """
-    At a given time t: buy Up if price(t) > price(0), else buy Down, only if the
-    chosen outcome's ask is less then the predicted probability.
-    """
-
-    def __init__(self):
-        self.initial_price = None
-        self.initial_market = None
-
-    def __call__(
-        self, market_state: MarketState, t: int, price: float,
-    ) -> Transaction | None:
-        if self.initial_market != market_state.slug:
-            self.initial_price = price
-            self.initial_market = market_state.slug
-
-        if t != 800:
-            return None
-
-        outcome_to_buy = "Up" if self.initial_price < price else "Down"
-        best_ask = market_state.orderbooks[outcome_to_buy].get_ask(0)
-        if best_ask.price < 0.92:
-            return Transaction(
-                outcome=outcome_to_buy,
-                order_type=OrderType.BUY,
-                shares=1,
-                price=best_ask.price,
-            )
-
-        return None

@@ -2,7 +2,7 @@ import abc
 import math
 
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 import pandas as pd
 
@@ -53,6 +53,29 @@ class OrderBook:
 
         return available, total_cost / available
 
+    def get_sell_liquidity(
+        self, desired_shares: int, min_price: float | None = None
+    ) -> tuple[int, float]:
+        """Fill up to desired_shares by selling against bids. Returns (filled, avg_price) or (0, 0.0)."""
+        filled = 0
+        total_proceeds = 0.0
+
+        for bid in self.bids:
+            if filled >= desired_shares:
+                break
+            if bid.size == 0:
+                continue
+            if min_price is not None and (math.isnan(bid.price) or bid.price < min_price):
+                continue
+            shares_to_sell = min(desired_shares - filled, bid.size)
+            total_proceeds += shares_to_sell * bid.price
+            filled += shares_to_sell
+
+        if filled == 0:
+            return 0, 0.0
+
+        return filled, total_proceeds / filled
+
 
 @dataclass
 class MarketState:
@@ -95,7 +118,32 @@ class MarketState:
         return cls(slug=slug, orderbooks=orderbooks)
 
 
+class ExecutorProtocol(Protocol):
+    """Protocol for an executor that owns capital and positions."""
+
+    @property
+    def capital(self) -> float: ...
+
+    def get_positions(self, slug: str) -> dict[str, int]: ...
+
+    def execute(
+        self,
+        transactions: list[Transaction],
+        market_state: MarketState,
+    ): ...
+
+
 class StrategyBase(abc.ABC):
+    def __init__(self, executor: ExecutorProtocol):
+        self.executor = executor
+
+    def process_orderbook(
+        self, market_state: MarketState, t: int, *args, **kwds
+    ) -> list[Transaction]:
+        txs = self(market_state, t, *args, **kwds)
+        self.executor.execute(txs, market_state)
+        return txs
+
     @abc.abstractmethod
     def __call__(
         self, market_state: MarketState, t: int, *args, **kwds

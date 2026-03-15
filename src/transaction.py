@@ -17,3 +17,13 @@ class Transaction:
     price: float
 
     t: datetime | int
+
+    def cost(self) -> float:
+        """Returns the capital impact of this transaction.
+
+        Positive = capital consumed (money leaves strategy)
+        Negative = capital added (money enters strategy)
+        """
+        if self.order_type == OrderType.BUY:
+            return self.shares * self.price
+        return -self.shares * self.price
