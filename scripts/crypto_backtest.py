@@ -3,18 +3,21 @@ import pathlib
 import duckdb
 import numpy as np
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from tqdm import tqdm
 
 from src.ai_strategy import AIStrategy
 from src.execution import ExecutionError, Executor
 from src.strategy import MarketState
 
+
+INITIAL_CAPITAL = 500
 CRYPTO_DATA_DIR = pathlib.Path(__file__).parent.parent / "data/crypto-prices"
 
 
 def main():
-    capital = 100
+    capital = INITIAL_CAPITAL
 
     returns = []
     with duckdb.connect(CRYPTO_DATA_DIR / "test.duckdb") as conn:
@@ -72,7 +75,7 @@ def main():
     win_rate = float(np.mean(period_returns > 0)) if n else 0.0
     # Max drawdown from cumulative gross
     peak = np.maximum.accumulate(cum_gross)
-    drawdown = (cum_gross - peak) / np.maximum(peak, 1e-12)
+    drawdown = (cum_gross - peak) / peak
     max_dd = float(np.min(drawdown)) if n else 0.0
 
     print("\n--- Backtest summary ---")
@@ -84,26 +87,36 @@ def main():
     print(f"Win rate: {win_rate:.1%}")
     print(f"Max drawdown: {max_dd:.2%}")
 
-    # Plot cumulative returns
+    # Plot cumulative returns, capital, and drawdown
     if n > 0:
-        plot_df = pd.DataFrame({
-            "Market": range(n),
-            "Cumulative return": cum_gross,
-        })
-        fig = px.line(
-            plot_df,
-            x="Market",
-            y="Cumulative return",
+        x = np.arange(n)
+        fig = make_subplots(
+            rows=3, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.06,
+            subplot_titles=("Cumulative gross return", "Capital ($)", "Drawdown"),
+        )
+        fig.add_trace(
+            go.Scatter(x=x, y=cum_gross, name="Return", line=dict(color="#2563eb", width=2)),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=x, y=INITIAL_CAPITAL * cum_gross, name="Capital", line=dict(color="#059669", width=2)),
+            row=2, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=x, y=drawdown, name="Drawdown", fill="tozeroy", line=dict(color="#dc2626", width=1.5)),
+            row=3, col=1,
         )
         fig.update_layout(
-            xaxis_title="Market index",
-            yaxis_title="Cumulative gross return",
-            # yaxis_tickformat=".2f",
-            # margin=dict(t=60, b=50, l=60, r=40),
-            # hovermode="x unified",
+            height=800,
             showlegend=False,
         )
-        fig.write_image("cumulative_returns.png")
+        fig.update_yaxes(tickformat=".2f", row=1)
+        fig.update_yaxes(tickformat="$.0f", row=2)
+        fig.update_yaxes(tickformat=".0%", row=3)
+        fig.update_xaxes(title_text="Market index", row=3)
+        fig.write_image("cumulative_returns.png", scale=2)
         print("Saved cumulative returns plot to cumulative_returns.png")
 
 
