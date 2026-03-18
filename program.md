@@ -109,7 +109,7 @@ LOOP FOREVER:
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
 7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
 8. If `sharpe_ratio` improved (higher is better) AND `Max drawdown` is below 20%, you "advance" the branch, keeping the git commit.
-9. If `sharpe_ratio` is equal or worse (or if drawdown exceeds 20%), you `git reset --hard HEAD~1` back to where you started.
+9. If `sharpe_ratio` is equal or worse (or if drawdown exceeds 20%), you keep the commit but continue experimenting, researching and improving in a new direction.
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 
