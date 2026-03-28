@@ -33,6 +33,7 @@ def worker(task_id: str, slugs: list[str], initial_capital: int, progress: dict)
     capital = initial_capital
     returns = []
     with duckdb.connect(DB_PATH, read_only=True) as conn:
+        conn.execute("SET enable_progress_bar = false")
         slugs_df = pd.DataFrame({"slug": slugs})
         conn.register("slugs_df", slugs_df)
         all_df = conn.execute("""
@@ -158,6 +159,7 @@ def main():
     n_periods = max(1, args.periods)
 
     with duckdb.connect(DB_PATH, read_only=True) as conn:
+        conn.execute("SET enable_progress_bar = false")
         slugs = (
             conn.query("SELECT DISTINCT slug FROM resolved ORDER BY slug;")
             .fetchdf()["slug"]
@@ -175,7 +177,9 @@ def main():
 
         with multiprocessing.Manager() as manager:
             progress_dict = manager.dict()
-            overall_progress_task = progress.add_task("[green]All markets progress:")
+            overall_progress_task = progress.add_task(
+                "[green]All markets progress:", visible=False
+            )
 
             with ProcessPoolExecutor(
                 max_workers=min(n_periods, os.cpu_count() - 1),
@@ -185,9 +189,13 @@ def main():
                     start, _ = CryptoMarkets15m.slug_to_time_range(chunk[0])
                     _, end = CryptoMarkets15m.slug_to_time_range(chunk[-1])
 
-                    task_id = progress.add_task(f"Period {i}: {start.date()} - {end.date()}", visible=False)
+                    task_id = progress.add_task(
+                        f"Period {i}: {start.date()} - {end.date()}", visible=False
+                    )
                     futures.append(
-                        executor.submit(worker, task_id, chunk, INITIAL_CAPITAL, progress_dict)
+                        executor.submit(
+                            worker, task_id, chunk, INITIAL_CAPITAL, progress_dict
+                        )
                     )
 
                 # monitor the progress:
@@ -195,7 +203,10 @@ def main():
                     futures
                 ):
                     progress.update(
-                        overall_progress_task, completed=n_finished, total=len(futures)
+                        overall_progress_task,
+                        completed=n_finished,
+                        total=len(futures),
+                        visible=n_finished < len(futures),
                     )
                     for task_id, update_data in progress_dict.items():
                         latest = update_data["completed"]
