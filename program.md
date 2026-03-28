@@ -101,7 +101,7 @@ LOOP FOREVER:
 
 1. Look at the git state: the current branch/commit we're on.
 2. Tune `src/ai_strategy.py` or write/update training scripts (`scripts/train_model.py`) with an experimental idea. Think about market mechanics: 15-minute markets converge to 0 or 1 at expiry. Edge usually comes from discrepancies between orderbook implied probabilities and actual statistical probabilities.
-3. git commit
+3. git commit - this is very important always commit before experimenting so there is a history of the progress
 4. Run the experiment: 
    - If your strategy relies on an ML model that needs retraining, run it first: `python scripts/train_model.py` (or using `uv run`)
    - Run the backtest: `uv run python -m scripts.crypto_backtest > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
