@@ -289,3 +289,100 @@ fig_cal.show()
 # The plot above is a **reliability (calibration) curve** for the crowd’s implied probabilities. Observations are sorted into ten bins by `ask_1_price` (our `p_up`), which we treat as the market’s probability of `UP`. For each bin we plot the **mean predicted** probability on the horizontal axis and the **empirical frequency** of resolved `UP` outcomes (`outcome_price` averaged over rows in that bin) on the vertical axis. Marker size reflects how many snapshots fall in the bin.
 #
 # The dashed diagonal is **perfect calibration**: if the crowd is calibrated, points should lie on this line—e.g. whenever the market averages about 0.6 for `UP`, `UP` should occur about 60% of the time in that bin. In practice the points sit very close to the diagonal across the full [0, 1] range, which means the quoted prices are a trustworthy guide to realized frequencies rather than systematically shifted. Any small departures from the line (e.g. slightly below the diagonal in the mid-probability range) would indicate mild **overconfidence**—predicted probabilities a bit higher than the realized `UP` rate—but the overall picture matches the time-series plot: the crowd is **well calibrated**, with no large systematic bias.
+
+# %% [markdown]
+# ## How quickly does the crowd figure out the answer?
+#
+# We combine two views. First, for each 15m market we define **persistent correct time**: the earliest second such that the binary side implied by `ask_1_price` **never disagrees with** the realized outcome from that second through the **last observed snapshot** in the window. This is when the crowd has "locked in" the winning side for the rest of the data we see. If the last quote is still on the wrong side, we set this time to **900** (end of the window) and record **`censored_at_end`** for that market.
+#
+# Second, we plot **mean Brier score** $\left((p - y)^2\right)$ versus `seconds`: this curve shows how fast **probability error** decays through the window.
+
+# %%
+def _persistent_correct_one_market(g: pd.DataFrame) -> pd.Series:
+    g = g.sort_values("seconds")
+    seconds = g["seconds"].to_numpy(dtype=float)
+    pred = (g["ask_1_price"].to_numpy() > 0.5).astype(np.int8)
+    y = int(g["outcome_price"].iloc[0])
+    wrong = pred != y
+    if not wrong.any():
+        return pd.Series(
+            {"time_persistent_correct": float(seconds[0]), "censored_at_end": False}
+        )
+    last_wrong = int(np.nonzero(wrong)[0][-1])
+    if last_wrong == len(wrong) - 1:
+        return pd.Series({"time_persistent_correct": 900.0, "censored_at_end": True})
+    return pd.Series(
+        {
+            "time_persistent_correct": float(seconds[last_wrong + 1]),
+            "censored_at_end": False,
+        }
+    )
+
+
+_slugs, _groups = zip(*crowd.groupby("slug", sort=False))
+market_timing = pd.DataFrame(
+    (_persistent_correct_one_market(g) for g in _groups),
+    index=pd.Index(_slugs, name="slug"),
+)
+crowd["brier"] = (crowd["ask_1_price"] - crowd["outcome_price"]) ** 2
+by_sec_brier = (
+    crowd.groupby("seconds", sort=True)["brier"].mean().reset_index(name="mean_brier")
+)
+
+quantile_levels = (0.1, 0.25, 0.5, 0.75, 0.9)
+t_quants = market_timing["time_persistent_correct"].quantile(list(quantile_levels))
+censored_share = float(market_timing["censored_at_end"].mean())
+
+palette = px.colors.qualitative.Plotly
+fig_speed = go.Figure(
+    data=[
+        go.Scatter(
+            x=by_sec_brier["seconds"],
+            y=by_sec_brier["mean_brier"],
+            mode="lines",
+            name="Mean Brier (ask vs outcome)",
+        )
+    ]
+)
+ymax = float(by_sec_brier["mean_brier"].max())
+for i, q in enumerate(quantile_levels):
+    xv = float(t_quants[q])
+    fig_speed.add_shape(
+        type="line",
+        x0=xv,
+        x1=xv,
+        y0=0,
+        y1=ymax,
+        line=dict(color=palette[i % len(palette)], width=1.5, dash="dash"),
+    )
+    fig_speed.add_annotation(
+        x=xv,
+        y=ymax,
+        text=f"p{int(round(q * 100)):d}",
+        showarrow=False,
+        yshift=4,
+        font=dict(size=10, color=palette[i % len(palette)]),
+    )
+
+fig_speed.update_layout(
+    title=(
+        "Mean Brier vs time; quantiles of persistent correct time "
+        f"(censored_at_end: {censored_share:.1%})"
+    ),
+    xaxis_title="Seconds into 15m window",
+    yaxis_title="Mean Brier",
+    yaxis=dict(rangemode="tozero"),
+    #showlegend=True,
+    margin=dict(t=80),
+)
+fig_speed.show()
+
+# %% [markdown]
+# The figure is very consistent with the previous ones. Reading the quantile levels for persistent correct time, we obtain:
+# - 10%: 0.0 seconds
+# - 25%: 66.0 seconds
+# - 50%: 314.0 seconds
+# - 75%: 661.0 seconds
+# - 90%: 839.0 seconds
+#
+# Which we can interpret by, in case of 75% of markets we observed they don't change and predict the correct outcome under 661 seconds
