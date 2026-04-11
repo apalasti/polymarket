@@ -21,7 +21,6 @@
 # But in the first phase the goal is to do exploratory data analysis and to answer these interesting questions:
 # - How accurate is the crowd in predicting the real outcome?
 # - How quickly does the crowd figure out the answer before the 15 minutes are up?
-# - Based on the gap between the start and current asset price, what probability does the crowd assign to `UP` and `DOWN` outcomes?
 # - When the Current Price suddenly spikes on the crypto exchange, how many seconds or minutes does it take for the Polymarket probability to catch up?
 
 # %%
@@ -385,4 +384,102 @@ fig_speed.show()
 # - 75%: 661.0 seconds
 # - 90%: 839.0 seconds
 #
-# Which we can interpret by, in case of 75% of markets we observed they don't change and predict the correct outcome under 661 seconds
+# Which we can interpret by, in case of 75% of markets we observed they don't change and predict the correct outcome under 661 seconds
+
+# %% [markdown]
+# **When the Current Price suddenly spikes on the crypto exchange, how many seconds or minutes does it take for the Polymarket probability to catch up?**
+#
+# We use time-lagged cross-correlation (TLCC) on changes: 
+# - log-returns of spot `price` (1s grid)
+# - mid price (`(bid_1_price + ask_1_price) / 2` after resampling and forward-filling)
+# 
+# This captures short-term reactions, not gradual trends. Markets are aligned to wall-clock (`ob_updated_at`). We drop the last 2 minutes (after 13 min) since spot moves there rarely affect the mid.
+#
+
+# %%
+def _pearson_lagged(
+    x: np.ndarray, y: np.ndarray, lag: int, min_pairs: int = 120
+) -> float:
+    """Pearson r between x[t] and y[t+lag]; same length series, lag in steps."""
+    if lag > 0:
+        a, b = x[:-lag], y[lag:]
+    elif lag < 0:
+        a, b = x[-lag:], y[:lag]
+    else:
+        a, b = x, y
+    if len(a) < min_pairs:
+        return float("nan")
+    sa, sb = np.std(a, ddof=1), np.std(b, ddof=1)
+    if sa == 0 or sb == 0:
+        return float("nan")
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def _market_tlcc_curve_mid(
+    g: pd.DataFrame,
+    lag_grid: range,
+    min_post_diff: int = 400,
+    exclude_final_seconds: int = 120,
+) -> np.ndarray | None:
+    """Pearson r vs lag for Δlog(price) vs Δp_mid; None if skipped."""
+    g = g.sort_values("ob_updated_at").drop_duplicates("ob_updated_at", keep="last")
+    if len(g) < 5:
+        return None
+    t0 = g["start_of_market"].iloc[0]
+    d = (
+        g.set_index("ob_updated_at")[["price", "bid_1_price", "ask_1_price"]]
+        .resample("1s")
+        .ffill()
+    )
+    d = d.loc[(d.index - t0).total_seconds() < 900 - exclude_final_seconds]
+    dp = np.log(d["price"].astype(float)).diff().to_numpy()
+    dm = ((d["bid_1_price"] + d["ask_1_price"]) / 2).diff().to_numpy()
+    ok = np.isfinite(dp) & np.isfinite(dm)
+    if int(ok.sum()) < min_post_diff:
+        return None
+    dp, dm = dp[ok], dm[ok]
+    return np.array([_pearson_lagged(dp, dm, tau) for tau in lag_grid])
+
+
+lag_s = 30
+lag_grid = range(-lag_s, lag_s + 1)
+curves_tlcc = [
+    c
+    for _, g in crowd.groupby("slug", sort=False)
+    if (c := _market_tlcc_curve_mid(g, lag_grid)) is not None and np.any(np.isfinite(c))
+]
+
+market_corr_curves = np.vstack(curves_tlcc)
+mean_correlation = np.nanmean(market_corr_curves, axis=0)
+lag_seconds = np.array(list(lag_grid), dtype=float)
+
+fig_crosscorr_spot_mid = go.Figure()
+fig_crosscorr_spot_mid.add_trace(
+    go.Scatter(
+        x=lag_seconds,
+        y=mean_correlation,
+        mode="lines+markers",
+        name="Mean correlation, spot return vs. mid change",
+        line=dict(color="#636efa"),
+        showlegend=False,
+    )
+)
+fig_crosscorr_spot_mid.add_vline(
+    x=0, line_dash="dash", line_color="gray", opacity=0.7, annotation_text="τ = 0"
+)
+fig_crosscorr_spot_mid.update_layout(
+    title=(
+        "Time-lagged correlation: spot log-return vs. mid quote changes"
+    ),
+    xaxis_title="Lag τ (seconds)",
+    yaxis_title="Mean Pearson correlation across markets",
+    margin=dict(t=80),
+)
+fig_crosscorr_spot_mid.show()
+
+# %% [markdown]
+# On the mean across markets, correlation is strongest at $τ = 0$ seconds, with peak $r ≈ 0.28$. We do not see Polymarket systematically “chasing” spot price a few seconds later. That is compatible with 
+# - (a) very fast repricing of the contract relative to a one-second bar, 
+# - (b) forward‑filled order-book snapshots hiding sub-second reaction, or 
+# - (c) shared drivers moving both series at once so lead–lag is small.
+#
